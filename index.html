@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bank Transactions Exporter</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg,#f0f4ff,#ffffff);
+      margin: 0;
+      padding: 30px;
+      color: #2c3e50;
+    }
+    .container {
+      max-width: 1100px;
+      margin: auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 26px;
+      font-weight: 600;
+      text-align: center;
+      color: #1b4f9c;
+    }
+    .description {
+      font-size: 14px;
+      text-align: center;
+      margin-bottom: 20px;
+      color: #555;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      color: #34495e;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #d0d7e2;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    button.primary {
+      background: #1b4f9c;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: none;
+    }
+    button.primary:hover {
+      background: #153d78;
+    }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th {
+      background: #1b4f9c;
+      color: #fff;
+      padding: 10px;
+      font-size: 13px;
+      text-align: left;
+    }
+    td {
+      padding: 10px;
+      font-size: 13px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    tr:hover td {
+      background: #f9fbff;
+    }
+    .remove-btn {
+      background: transparent;
+      border: none;
+      color: #d9534f;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    canvas {
+      margin-top: 30px;
+    }
+    .note {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bank Transactions Exporter</h1>
+    <div class="description">Add transactions (date, bank, amount). Export them to an ordered Excel sheet with unique Bill Nos. and view totals per bank.</div>
+
+    <div class="row">
+      <div>
+        <label for="date">Date</label>
+        <input id="date" type="date" />
+      </div>
+      <div>
+        <label for="bank">Bank</label>
+        <select id="bank">
+          <option value="State Bank of India">State Bank of India</option>
+          <option value="Indian Bank">Indian Bank</option>
+          <option value="Bank of Baroda">Bank of Baroda</option>
+          <option value="Baroda UP Bank">Baroda UP Bank</option>
+          <option value="Union Bank of India">Union Bank of India</option>
+        </select>
+      </div>
+      <div>
+        <label for="amount">Amount (₹)</label>
+        <input id="amount" type="text" placeholder="e.g. 1,23,456" />
+      </div>
+      <div>
+        <label for="startBill">Starting Bill No.</label>
+        <input id="startBill" type="number" min="1" value="1" />
+      </div>
+      <div style="align-self:end">
+        <button id="addBtn" class="primary">Add Transaction</button>
+      </div>
+    </div>
+
+    <table id="previewTable" style="display:none">
+      <thead>
+        <tr>
+          <th>Bill No.</th>
+          <th>Date</th>
+          <th>Bank</th>
+          <th>Amount (₹)</th>
+          <th>Remove</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="actions">
+      <button id="exportBtn" class="primary" style="display:none">Export .xlsx</button>
+      <button id="clearBtn" style="display:none">Clear All</button>
+    </div>
+
+    <canvas id="chartCanvas" height="120"></canvas>
+
+    <div class="note">Rows will be sorted by date (ascending). For the same date, ordering will be: State Bank of India → Indian Bank → Bank of Baroda → Baroda UP Bank → Union Bank of India. Each entry gets a unique Bill No. starting from your chosen number.</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const BANK_ORDER = [
+      'State Bank of India',
+      'Indian Bank',
+      'Bank of Baroda',
+      'Baroda UP Bank',
+      'Union Bank of India'
+    ];
+
+    const entries = [];
+
+    const dateInput = document.getElementById('date');
+    const bankInput = document.getElementById('bank');
+    const amountInput = document.getElementById('amount');
+    const addBtn = document.getElementById('addBtn');
+    const previewTable = document.getElementById('previewTable');
+    const previewBody = previewTable.querySelector('tbody');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const startBillInput = document.getElementById('startBill');
+
+    const chartCanvas = document.getElementById('chartCanvas');
+    let chart;
+
+    function formatIndianNumber(x){
+      if (x === '' || x == null) return '';
+      let num = x.toString().replace(/[^0-9.]/g,'');
+      if (num === '') return '';
+      const parts = num.split('.');
+      let intPart = parts[0];
+      let dec = parts[1] || '';
+      intPart = intPart.replace(/^0+(?=\d)/, '');
+      if (intPart.length > 3){
+        const last3 = intPart.slice(-3);
+        const rest = intPart.slice(0, -3);
+        const restWithCommas = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+        intPart = restWithCommas + ',' + last3;
+      }
+      return dec ? (intPart + '.' + dec) : intPart;
+    }
+
+    amountInput.addEventListener('input', () => {
+      const raw = amountInput.value;
+      const formatted = formatIndianNumber(raw);
+      amountInput.value = formatted;
+    });
+
+    function renderPreview(){
+      previewBody.innerHTML = '';
+      if (entries.length === 0){
+        previewTable.style.display = 'none';
+        exportBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+        updateChart();
+        return;
+      }
+      previewTable.style.display = '';
+      exportBtn.style.display = '';
+      clearBtn.style.display = '';
+      const startBill = parseInt(startBillInput.value,10) || 1;
+      entries.forEach((e,i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${startBill + i}</td><td>${formatDisplayDate(e.date)}</td><td>${e.bank}</td><td>₹ ${formatIndianNumber(e.amount)}</td><td><button class="remove-btn" data-i="${i}">✕</button></td>`;
+        previewBody.appendChild(tr);
+      });
+      previewBody.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.onclick = () => {
+          const i = parseInt(btn.dataset.i,10);
+          entries.splice(i,1);
+          renderPreview();
+        };
+      });
+      updateChart();
+    }
+
+    function updateChart(){
+      const totals = BANK_ORDER.map(bank => 0);
+      entries.forEach(e => {
+        const idx = BANK_ORDER.indexOf(e.bank);
+        totals[idx] += Number(e.amount);
+      });
+      if (chart) chart.destroy();
+      chart = new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+          labels: BANK_ORDER,
+          datasets: [{
+            label: 'Total Amount (₹)',
+            data: totals,
+            backgroundColor: '#1b4f9c'
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins:{legend:{display:false}},
+          scales:{y:{beginAtZero:true}}
+        }
+      });
+    }
+
+    function formatDisplayDate(d){
+      if (!d) return '';
+      const parts = d.split('-');
+      return parts.reverse().join('-');
+    }
+
+    addBtn.addEventListener('click', () => {
+      const date = dateInput.value;
+      const bank = bankInput.value;
+      const amountRaw = amountInput.value.replace(/,/g,'').trim();
+      if (!date){ alert('Please pick a date.'); return; }
+      if (!bank){ alert('Please select a bank.'); return; }
+      if (!amountRaw || isNaN(amountRaw)) { alert('Please enter a valid amount (numbers only).'); return; }
+      entries.push({date, bank, amount: String(Math.round(Number(amountRaw))) });
+      amountInput.value = '';
+      renderPreview();
+    });
+
+    clearBtn.addEventListener('click', ()=>{
+      if (!confirm('Clear all entries?')) return;
+      entries.length = 0;
+      renderPreview();
+    });
+
+    function sortEntriesForExport(arr){
+      return arr.slice().sort((a,b) => {
+        if (a.date < b.date) return -1;
+        if (a.date > b.date) return 1;
+        const ia = BANK_ORDER.indexOf(a.bank);
+        const ib = BANK_ORDER.indexOf(b.bank);
+        return ia - ib;
+      });
+    }
+
+    exportBtn.addEventListener('click', () => {
+      if (entries.length === 0) { alert('No entries to export'); return; }
+      const sorted = sortEntriesForExport(entries);
+      const header = ['Bill No.', 'Date', ...BANK_ORDER];
+      const rows = [header];
+      const startBill = parseInt(startBillInput.value,10) || 1;
+      sorted.forEach((e,idx) => {
+        const bankCols = BANK_ORDER.map(()=> '');
+        const bankIndex = BANK_ORDER.indexOf(e.bank);
+        bankCols[bankIndex] = formatIndianNumber(e.amount);
+        const dateStr = formatDisplayDate(e.date);
+        const row = [startBill + idx, dateStr, ...bankCols];
+        rows.push(row);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      const wscols = [ {wch:10}, {wch:12} , {wch:16},{wch:16},{wch:16},{wch:16},{wch:20} ];
+      ws['!cols'] = wscols;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+      const now = new Date();
+      const pad = (n)=>n.toString().padStart(2,'0');
+      const fname = `bank_transactions_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+      XLSX.writeFile(wb, fname);
+    });
+
+    amountInput.addEventListener('keypress', (e)=>{ if (e.key === 'Enter') addBtn.click(); });
+
+    renderPreview();
+  </script>
+</body>
+</html>
