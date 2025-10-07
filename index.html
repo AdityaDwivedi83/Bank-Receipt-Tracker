@@ -116,7 +116,7 @@
 <body>
   <div class="container">
     <h1>Bank Transactions Exporter</h1>
-    <div class="description">Add transactions (date, bank, amount). Export them to an ordered Excel sheet with unique Bill Nos. and view totals per bank.</div>
+    <div class="description">Add transactions (date, bank, amount). Export them to an ordered Excel sheet with unique Bill Nos., view totals per bank, and grand totals.</div>
 
     <div class="row">
       <div>
@@ -130,6 +130,7 @@
           <option value="Indian Bank">Indian Bank</option>
           <option value="Bank of Baroda">Bank of Baroda</option>
           <option value="Baroda UP Bank">Baroda UP Bank</option>
+          <option value="Bank of Maharashtra">Bank of Maharashtra</option>
           <option value="Union Bank of India">Union Bank of India</option>
         </select>
       </div>
@@ -166,7 +167,7 @@
 
     <canvas id="chartCanvas" height="120"></canvas>
 
-    <div class="note">Rows will be sorted by date (ascending). For the same date, ordering will be: State Bank of India → Indian Bank → Bank of Baroda → Baroda UP Bank → Union Bank of India. Each entry gets a unique Bill No. starting from your chosen number.</div>
+    <div class="note">Rows will be sorted by date (ascending). For the same date, ordering will be: State Bank of India → Indian Bank → Bank of Baroda → Baroda UP Bank → Bank of Maharashtra → Union Bank of India. Each entry gets a unique Bill No. starting from your chosen number.</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -177,6 +178,7 @@
       'Indian Bank',
       'Bank of Baroda',
       'Baroda UP Bank',
+      'Bank of Maharashtra',
       'Union Bank of India'
     ];
 
@@ -305,22 +307,40 @@
       });
     }
 
+    // 🧮 Enhanced Export Function with Column and Grand Totals
     exportBtn.addEventListener('click', () => {
       if (entries.length === 0) { alert('No entries to export'); return; }
+
       const sorted = sortEntriesForExport(entries);
       const header = ['Bill No.', 'Date', ...BANK_ORDER];
       const rows = [header];
       const startBill = parseInt(startBillInput.value,10) || 1;
+      const bankTotals = BANK_ORDER.map(()=>0);
+
       sorted.forEach((e,idx) => {
         const bankCols = BANK_ORDER.map(()=> '');
         const bankIndex = BANK_ORDER.indexOf(e.bank);
         bankCols[bankIndex] = formatIndianNumber(e.amount);
+        bankTotals[bankIndex] += Number(e.amount);
         const dateStr = formatDisplayDate(e.date);
         const row = [startBill + idx, dateStr, ...bankCols];
         rows.push(row);
       });
+
+      // Add blank separator row
+      rows.push([]);
+
+      // Add bank-wise totals row
+      const totalRow = ['','TOTAL', ...bankTotals.map(t=>formatIndianNumber(t))];
+      rows.push(totalRow);
+
+      // Add grand total row
+      const grandTotal = bankTotals.reduce((a,b)=>a+b,0);
+      const grandRow = ['','GRAND TOTAL', ...BANK_ORDER.map(()=>''), formatIndianNumber(grandTotal)];
+      rows.push(grandRow);
+
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      const wscols = [ {wch:10}, {wch:12} , {wch:16},{wch:16},{wch:16},{wch:16},{wch:20} ];
+      const wscols = [ {wch:10}, {wch:12} , ...BANK_ORDER.map(()=>({wch:16})), {wch:20} ];
       ws['!cols'] = wscols;
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
@@ -336,3 +356,4 @@
   </script>
 </body>
 </html>
+
